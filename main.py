@@ -38,9 +38,7 @@ class SuggestRequest(BaseModel):
 
 def objectid_from_days(days: int):
     cutoff_datetime = datetime.utcnow() - timedelta(days=days)
-    return ObjectId.from_datetime(cutoff_datetime)
-
-# Root endpoint 
+    return ObjectId.from_datetime(cutoff_datetime) 
 
 @app.get("/")
 def home():
@@ -124,7 +122,6 @@ Return STRICT JSON ONLY:
 
         suggestions_json = response.choices[0].message.content
 
-        # Try to parse LLM output
         suggestions = json.loads(suggestions_json)
 
     except Exception as e:
