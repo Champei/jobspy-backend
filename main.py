@@ -1,28 +1,32 @@
 import os
-import time
+import json
 from typing import Optional, Dict, Any
+from datetime import datetime, timedelta
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from pymongo import MongoClient
 from bson.objectid import ObjectId
 from groq import Groq
-from datetime import datetime, timedelta
 
 app = FastAPI(title="JobSpy Unified API")
 
 MONGO_URI = os.getenv("MONGO_URI")
+
+if not MONGO_URI:
+    raise RuntimeError(" MONGO_URI Render Environment Variables mai set karle")
+
 client = MongoClient(MONGO_URI)
 db = client["jobspy"]
-COLLECTION = db["clean_jobs"]   
+COLLECTION = db["clean_jobs"]
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+
 if not GROQ_API_KEY:
-    raise RuntimeError("Set GROQ_API_KEY")
+    raise RuntimeError("GROQ_API_KEY Render Environment Variables mai set karle")
 
 llm = Groq(api_key=GROQ_API_KEY)
 MODEL = "llama-3.1-8b-instant"
-
 
 class JobQuery(BaseModel):
     months: int = 1
@@ -30,26 +34,33 @@ class JobQuery(BaseModel):
 
 class SuggestRequest(BaseModel):
     job_id: str
-    parsed_resume: Optional[Dict[str, Any]] = None  
-
+    parsed_resume: Optional[Dict[str, Any]] = None
 
 def objectid_from_days(days: int):
     cutoff_datetime = datetime.utcnow() - timedelta(days=days)
     return ObjectId.from_datetime(cutoff_datetime)
 
+# Root endpoint 
+
+@app.get("/")
+def home():
+    return {
+        "status": "ok",
+        "message": "JobSpy API is live on Render",
+        "endpoints": ["/jobs", "/suggest"]
+    }
 
 @app.post("/jobs")
 def get_jobs(query: JobQuery):
     days = query.months * 30
     cutoff_id = objectid_from_days(days)
 
-    cursor = (
-        COLLECTION
-        .find({"_id": {"$gte": cutoff_id}}, {"_id": 0})
-        .limit(query.limit)
+    jobs = list(
+        COLLECTION.find(
+            {"_id": {"$gte": cutoff_id}},
+            {"_id": 0}
+        ).limit(query.limit)
     )
-
-    jobs = list(cursor)
 
     return {
         "months_requested": query.months,
@@ -57,7 +68,6 @@ def get_jobs(query: JobQuery):
         "returned": len(jobs),
         "jobs": jobs
     }
-
 
 @app.post("/suggest")
 def suggest(req: SuggestRequest):
@@ -78,7 +88,7 @@ def suggest(req: SuggestRequest):
     job_desc = job.get("description", "")
 
     resume_text = (
-        str(req.parsed_resume)
+        json.dumps(req.parsed_resume, indent=2)
         if req.parsed_resume
         else "No resume provided"
     )
@@ -112,7 +122,10 @@ Return STRICT JSON ONLY:
             temperature=0
         )
 
-        suggestions = response.choices[0].message.content
+        suggestions_json = response.choices[0].message.content
+
+        # Try to parse LLM output
+        suggestions = json.loads(suggestions_json)
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
