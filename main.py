@@ -4,12 +4,24 @@ from typing import Optional, Dict, Any
 from datetime import datetime, timedelta
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from pymongo import MongoClient
 from bson.objectid import ObjectId
 from groq import Groq
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = FastAPI(title="JobSpy Unified API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 MONGO_URI = os.getenv("MONGO_URI")
 
@@ -53,12 +65,14 @@ def get_jobs(query: JobQuery):
     days = query.months * 30
     cutoff_id = objectid_from_days(days)
 
-    jobs = list(
-        COLLECTION.find(
-            {"_id": {"$gte": cutoff_id}},
-            {"_id": 0}
-        ).limit(query.limit)
-    )
+    jobs = []
+    cursor = COLLECTION.find({"_id": {"$gte": cutoff_id}}).limit(query.limit)
+    for job in cursor:
+        job_id = str(job.get("_id"))
+        job["_id"] = job_id
+        if "id" not in job:
+            job["id"] = job_id
+        jobs.append(job)
 
     return {
         "months_requested": query.months,
